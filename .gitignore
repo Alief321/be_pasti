@@ -1,0 +1,4 @@
+.env
+node_modules
+# config/service-account.json
+config/service-account.json
