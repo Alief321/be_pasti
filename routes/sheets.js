@@ -96,7 +96,7 @@ router.post('/inject-columns', async (req, res) => {
     await injectColumnsLogic(spreadsheetId);
     res.json({ message: 'Kolom berhasil di-inject.', spreadsheetId });
   } catch (error) {
-    res.status(500).json({ error: 'Pastikan email Service Account telah ditambahkan sebagai Editor di file tersebut.' });
+    res.status(500).json({ error });
   }
 });
 
@@ -105,22 +105,60 @@ router.post('/inject-columns', async (req, res) => {
 // ========================================================
 async function injectColumnsLogic(spreadsheetId) {
   const sheets = await getSheetsClient();
-  const metaData = await sheets.spreadsheets.get({ spreadsheetId });
+
+  const metaData = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))',
+  });
+
   const requests = [];
 
-  for (const sheet of metaData.data.sheets) {
-    const { sheetId, title: sheetName } = sheet.properties;
+  for (const sheet of metaData.data.sheets || []) {
+    const { sheetId, title: sheetName, gridProperties = {} } = sheet.properties;
+
+    const currentColumnCount = gridProperties.columnCount || 0;
+
     const escapedSheetName = sheetName.replace(/'/g, "''");
+
     const headerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `'${escapedSheetName}'!1:1`,
     });
 
-    const headers = headerResponse.data.values ? headerResponse.data.values[0] : [];
+    const headers = headerResponse.data.values?.[0] || [];
+
     const columnsToAdd = ['Status Penyelesaian', 'Tanggal Selesai', 'Catatan'].filter((column) => !headers.includes(column));
-    if (columnsToAdd.length === 0) continue;
+
+    if (columnsToAdd.length === 0) {
+      continue;
+    }
 
     const nextColIndex = headers.length;
+
+    // =====================================================
+    // 1. Pastikan grid memiliki cukup kolom
+    // =====================================================
+
+    const requiredColumnCount = nextColIndex + columnsToAdd.length;
+
+    if (requiredColumnCount > currentColumnCount) {
+      requests.push({
+        insertDimension: {
+          range: {
+            sheetId,
+            dimension: 'COLUMNS',
+            startIndex: currentColumnCount,
+            endIndex: requiredColumnCount,
+          },
+          inheritFromBefore: true,
+        },
+      });
+    }
+
+    // =====================================================
+    // 2. Tulis header kolom baru
+    // =====================================================
+
     requests.push({
       updateCells: {
         range: {
@@ -130,23 +168,59 @@ async function injectColumnsLogic(spreadsheetId) {
           startColumnIndex: nextColIndex,
           endColumnIndex: nextColIndex + columnsToAdd.length,
         },
-        rows: [{ values: columnsToAdd.map((column) => ({ userEnteredValue: { stringValue: column } })) }],
+        rows: [
+          {
+            values: columnsToAdd.map((column) => ({
+              userEnteredValue: {
+                stringValue: column,
+              },
+            })),
+          },
+        ],
         fields: 'userEnteredValue',
       },
     });
 
+    // =====================================================
+    // 3. Checkbox untuk Status Penyelesaian
+    // =====================================================
+
     if (!headers.includes('Status Penyelesaian')) {
+      const statusIndex = nextColIndex;
+
       requests.push({
         setDataValidation: {
-          range: { sheetId, startRowIndex: 1, startColumnIndex: nextColIndex, endColumnIndex: nextColIndex + 1 },
-          rule: { condition: { type: 'BOOLEAN' }, showCustomUi: true, strict: true },
+          range: {
+            sheetId,
+            startRowIndex: 1,
+            startColumnIndex: statusIndex,
+            endColumnIndex: statusIndex + 1,
+          },
+          rule: {
+            condition: {
+              type: 'BOOLEAN',
+            },
+            showCustomUi: true,
+            strict: true,
+          },
         },
       });
     }
   }
 
+  // =====================================================
+  // 4. Jalankan semua perubahan
+  // =====================================================
+
   if (requests.length > 0) {
-    await sheets.spreadsheets.batchUpdate({ spreadsheetId, resource: { requests } });
+    console.log(`Injecting ${requests.length} requests ke spreadsheet ${spreadsheetId}`);
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      resource: {
+        requests,
+      },
+    });
   }
 }
 
@@ -258,5 +332,61 @@ router.post('/update-row', async (req, res) => {
     res.status(500).json({ error: 'Gagal mengupdate Spreadsheet' });
   }
 });
+
+// router.get('/test', (req, res) => {
+//   res.json({
+//     success: true,
+//     message: 'SHEETS ROUTER AKTIF',
+//   });
+// });
+// router.get('/google-debug/:spreadsheetId', async (req, res) => {
+//   try {
+//     const auth = getGoogleAuth();
+
+//     // 1. Cek environment variable
+//     const hasClientId = !!process.env.GOOGLE_CLIENT_ID;
+//     const hasClientSecret = !!process.env.GOOGLE_CLIENT_SECRET;
+//     const hasRefreshToken = !!process.env.GOOGLE_REFRESH_TOKEN;
+
+//     // 2. Minta access token dari refresh token
+//     const tokenResponse = await auth.getAccessToken();
+
+//     const accessToken = tokenResponse?.token;
+
+//     // 3. Cek akses Spreadsheet menggunakan auth yang sama
+//     const sheets = google.sheets({
+//       version: 'v4',
+//       auth,
+//     });
+
+//     const spreadsheet = await sheets.spreadsheets.get({
+//       spreadsheetId: req.params.spreadsheetId,
+//     });
+
+//     res.json({
+//       success: true,
+
+//       auth: {
+//         hasClientId,
+//         hasClientSecret,
+//         hasRefreshToken,
+//         hasAccessToken: !!accessToken,
+//         tokenType: typeof accessToken,
+//       },
+
+//       spreadsheet: {
+//         id: spreadsheet.data.spreadsheetId,
+//         title: spreadsheet.data.properties?.title,
+//       },
+//     });
+//   } catch (error) {
+//     console.error('GOOGLE DEBUG ERROR:', error.response?.data || error.message || error);
+
+//     res.status(500).json({
+//       success: false,
+//       error: error.response?.data || error.message,
+//     });
+//   }
+// });
 
 module.exports = router;
