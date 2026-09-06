@@ -47,6 +47,8 @@ function authenticateToken(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
+  console.log('User :', req.user); // Debugging: Log the user role
+  console.log('User role:', req.user?.role); // Debugging: Log the user role
   if (req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Akses hanya untuk admin.' });
   }

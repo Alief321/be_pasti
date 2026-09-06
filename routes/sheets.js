@@ -85,9 +85,11 @@ router.post('/upload-excel', upload.single('file'), async (req, res) => {
 // ENDPOINT 2: INJECT KOLOM DARI LINK (YANG SUDAH ADA SEBELUMNYA)
 // ========================================================
 router.post('/inject-columns', async (req, res) => {
-  const { spreadsheetUrl } = req.body;
+  const { spreadsheetUrl, resolveOnly = false } = req.body;
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) return res.status(400).json({ error: 'Format link tidak valid.' });
+
+  if (resolveOnly === true) return res.json({ spreadsheetId });
 
   try {
     await injectColumnsLogic(spreadsheetId);
@@ -103,36 +105,48 @@ router.post('/inject-columns', async (req, res) => {
 async function injectColumnsLogic(spreadsheetId) {
   const sheets = await getSheetsClient();
   const metaData = await sheets.spreadsheets.get({ spreadsheetId });
-  const firstSheet = metaData.data.sheets[0];
-  const sheetName = firstSheet.properties.title;
-  const sheetId = firstSheet.properties.sheetId;
+  const requests = [];
 
-  const headerResponse = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `'${sheetName}'!1:1`,
-  });
+  for (const sheet of metaData.data.sheets) {
+    const { sheetId, title: sheetName } = sheet.properties;
+    const escapedSheetName = sheetName.replace(/'/g, "''");
+    const headerResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${escapedSheetName}'!1:1`,
+    });
 
-  const headers = headerResponse.data.values ? headerResponse.data.values[0] : [];
-  if (headers.indexOf('Status Penyelesaian') !== -1) return; // Sudah ada kolomnya
+    const headers = headerResponse.data.values ? headerResponse.data.values[0] : [];
+    const columnsToAdd = ['Status Penyelesaian', 'Tanggal Selesai', 'Catatan'].filter((column) => !headers.includes(column));
+    if (columnsToAdd.length === 0) continue;
 
-  const nextColIndex = headers.length;
-  const requests = [
-    {
+    const nextColIndex = headers.length;
+    requests.push({
       updateCells: {
-        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: nextColIndex, endColumnIndex: nextColIndex + 2 },
-        rows: [{ values: [{ userEnteredValue: { stringValue: 'Status Penyelesaian' } }, { userEnteredValue: { stringValue: 'Tanggal Selesai' } }] }],
+        range: {
+          sheetId,
+          startRowIndex: 0,
+          endRowIndex: 1,
+          startColumnIndex: nextColIndex,
+          endColumnIndex: nextColIndex + columnsToAdd.length,
+        },
+        rows: [{ values: columnsToAdd.map((column) => ({ userEnteredValue: { stringValue: column } })) }],
         fields: 'userEnteredValue',
       },
-    },
-    {
-      setDataValidation: {
-        range: { sheetId, startRowIndex: 1, startColumnIndex: nextColIndex, endColumnIndex: nextColIndex + 1 },
-        rule: { condition: { type: 'BOOLEAN' }, showCustomUi: true, strict: true },
-      },
-    },
-  ];
+    });
 
-  await sheets.spreadsheets.batchUpdate({ spreadsheetId, resource: { requests } });
+    if (!headers.includes('Status Penyelesaian')) {
+      requests.push({
+        setDataValidation: {
+          range: { sheetId, startRowIndex: 1, startColumnIndex: nextColIndex, endColumnIndex: nextColIndex + 1 },
+          rule: { condition: { type: 'BOOLEAN' }, showCustomUi: true, strict: true },
+        },
+      });
+    }
+  }
+
+  if (requests.length > 0) {
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId, resource: { requests } });
+  }
 }
 
 // Jangan lupa biarkan endpoint GET /data dan POST /update-row tetap ada di sini
@@ -143,36 +157,44 @@ router.get('/data/:spreadsheetId', async (req, res) => {
   try {
     const sheets = await getSheetsClient();
 
-    // Ambil nama sheet pertama
     const metaData = await sheets.spreadsheets.get({ spreadsheetId });
-    const sheetName = metaData.data.sheets[0].properties.title;
+    const sheetData = await Promise.all(
+      metaData.data.sheets.map(async (sheet) => {
+        const { sheetId, title: sheetName } = sheet.properties;
+        const escapedSheetName = sheetName.replace(/'/g, "''");
+        const response = await sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: `'${escapedSheetName}'`,
+        });
 
-    // Ambil seluruh data
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: `'${sheetName}'`, // Tarik semua baris dan kolom
+        const rows = response.data.values || [];
+        const headers = rows[0] || [];
+        const data = [];
+
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          const rowData = {
+            _rowIndex: i + 1,
+            sheetRowIndex: i + 1,
+          };
+
+          headers.forEach((header, index) => {
+            rowData[header] = row[index] || '';
+          });
+          data.push(rowData);
+        }
+
+        return { sheetId, sheetName, headers, data };
+      }),
+    );
+
+    const firstSheet = sheetData[0] || { sheetName: null, headers: [], data: [] };
+    res.json({
+      sheets: sheetData,
+      sheetName: firstSheet.sheetName,
+      headers: firstSheet.headers,
+      data: firstSheet.data,
     });
-
-    const rows = response.data.values;
-    if (!rows || rows.length === 0) return res.json({ data: [] });
-
-    const headers = rows[0];
-    const data = [];
-
-    // Mulai dari indeks 1 (baris ke-2) karena indeks 0 adalah header
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      let rowData = {
-        _rowIndex: i + 1, // Simpan nomor baris asli (untuk keperluan update nanti)
-      };
-
-      headers.forEach((header, index) => {
-        rowData[header] = row[index] || '';
-      });
-      data.push(rowData);
-    }
-
-    res.json({ headers, data, sheetName });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Gagal menarik data dari Spreadsheet' });
@@ -182,24 +204,54 @@ router.get('/data/:spreadsheetId', async (req, res) => {
 // Endpoint: POST /api/sheets/update-row
 // Mengupdate status checkbox dan tanggal selesai pada baris tertentu
 router.post('/update-row', async (req, res) => {
-  const { spreadsheetId, sheetName, rowIndex, isChecked, timestampColLetter, statusColLetter } = req.body;
+  const { spreadsheetId, sheetName, rowIndex, sheetRowIndex, isChecked, timestampColLetter, statusColLetter, noteColLetter, noteValue, note, catatan } = req.body;
 
   try {
+    const targetRowIndex = Number(sheetRowIndex ?? rowIndex);
+    if (!spreadsheetId || !sheetName || !Number.isInteger(targetRowIndex) || targetRowIndex < 1 || !statusColLetter || !timestampColLetter) {
+      return res.status(400).json({ error: 'Data update baris tidak lengkap' });
+    }
+
     const sheets = await getSheetsClient();
 
-    const statusValue = isChecked ? 'TRUE' : 'FALSE';
-    const timestampValue = isChecked ? new Date().toLocaleString('id-ID') : ''; // Kosongkan waktu jika di-uncheck
+    const checked = isChecked === true || isChecked === 'true';
+    const statusValue = checked;
+    const timestampValue = checked ? new Date().toLocaleString('id-ID') : '';
+    const resolvedNote = noteValue ?? note ?? catatan;
+    const data = [
+      {
+        range: `'${sheetName}'!${statusColLetter}${targetRowIndex}`,
+        values: [[statusValue]],
+      },
+      {
+        range: `'${sheetName}'!${timestampColLetter}${targetRowIndex}`,
+        values: [[timestampValue]],
+      },
+    ];
 
-    await sheets.spreadsheets.values.update({
+    if (noteColLetter && resolvedNote !== undefined) {
+      data.push({
+        range: `'${sheetName}'!${noteColLetter}${targetRowIndex}`,
+        values: [[String(resolvedNote)]],
+      });
+    }
+
+    await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId,
-      range: `'${sheetName}'!${statusColLetter}${rowIndex}:${timestampColLetter}${rowIndex}`,
-      valueInputOption: 'USER_ENTERED',
       resource: {
-        values: [[statusValue, timestampValue]],
+        data,
+        valueInputOption: 'USER_ENTERED',
       },
     });
 
-    res.json({ message: 'Baris berhasil diupdate', timestamp: timestampValue });
+    res.json({
+      message: 'Baris berhasil diupdate',
+      sheetRowIndex: targetRowIndex,
+      updatedRanges: data.map((item) => item.range),
+      timestamp: timestampValue,
+      status: statusValue,
+      note: resolvedNote,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Gagal mengupdate Spreadsheet' });

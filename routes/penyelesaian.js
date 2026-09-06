@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const publicRouter = express.Router();
 const supabase = require('../config/supabase');
-const { requireAdmin } = require('../utils/auth');
+const { authenticateToken, requireAdmin } = require('../utils/auth');
 
 const hashShareToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
@@ -72,7 +72,7 @@ router.get('/survei/:id/column-mapping', async (req, res) => {
   res.json(data || { id_survei: req.params.id, key_column: null, column_mapping: {}, key_mappings: {} });
 });
 
-router.put('/survei/:id/column-mapping', requireAdmin, async (req, res) => {
+router.put('/survei/:id/column-mapping', authenticateToken, requireAdmin, async (req, res) => {
   const { key_column = null, column_mapping = {}, key_mappings = {} } = req.body;
   if (!column_mapping || typeof column_mapping !== 'object' || Array.isArray(column_mapping)) {
     return res.status(400).json({ error: 'column_mapping harus berupa object.' });
@@ -106,7 +106,7 @@ router.get('/:id/mapping', async (req, res) => {
   res.json(data || { id_penyelesaian: req.params.id, key_column: null, column_mapping: {} });
 });
 
-router.put('/:id/mapping', requireAdmin, async (req, res) => {
+router.put('/:id/mapping', authenticateToken, requireAdmin, async (req, res) => {
   const { key_column = null, column_mapping = {} } = req.body;
   if (!column_mapping || typeof column_mapping !== 'object' || Array.isArray(column_mapping)) {
     return res.status(400).json({ error: 'column_mapping harus berupa object.' });
@@ -130,7 +130,7 @@ router.put('/:id/mapping', requireAdmin, async (req, res) => {
   res.json(data);
 });
 
-router.post('/:id/share', requireAdmin, async (req, res) => {
+router.post('/:id/share', authenticateToken, requireAdmin, async (req, res) => {
   const { allowed_sheets = [], expires_at = null } = req.body;
   if (!Array.isArray(allowed_sheets)) {
     return res.status(400).json({ error: 'allowed_sheets harus berupa array.' });
@@ -156,17 +156,17 @@ router.post('/:id/share', requireAdmin, async (req, res) => {
   res.status(201).json({ ...data, token });
 });
 
-router.get('/:id/shares', requireAdmin, async (req, res) => {
+router.get('/:id/shares', authenticateToken, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from('penyelesaian_shares')
-    .select('id, id_penyelesaian, permission, allowed_sheets, expires_at, revoked_at, created_at')
+    .select('id, id_penyelesaian, permission, token_hash, allowed_sheets, expires_at, revoked_at, created_at')
     .eq('id_penyelesaian', req.params.id)
     .order('created_at', { ascending: false });
   if (error) return handleSupabaseError(res, error);
   res.json(data);
 });
 
-router.delete('/:id/shares/:shareId', requireAdmin, async (req, res) => {
+router.delete('/:id/shares/:shareId', authenticateToken, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from('penyelesaian_shares')
     .update({ revoked_at: new Date().toISOString() })
@@ -181,7 +181,10 @@ router.delete('/:id/shares/:shareId', requireAdmin, async (req, res) => {
 });
 
 publicRouter.get('/:token', async (req, res) => {
-  const { data: share, error: shareError } = await supabase.from('penyelesaian_shares').select('id, id_penyelesaian, permission, allowed_sheets, expires_at, revoked_at').eq('token_hash', hashShareToken(req.params.token)).maybeSingle();
+  console.log('Public access with token:', req.params.token);
+  const { data: share, error: shareError } = await supabase.from('penyelesaian_shares').select('id, id_penyelesaian, permission, allowed_sheets, expires_at, revoked_at').eq('token_hash', req.params.token).maybeSingle();
+  // console.log('Share data:', share, 'Error:', shareError);
+
   if (shareError) return handleSupabaseError(res, shareError);
   if (!share || share.revoked_at || (share.expires_at && new Date(share.expires_at) <= new Date())) {
     return res.status(404).json({ error: 'Link publik tidak ditemukan atau sudah kedaluwarsa.' });

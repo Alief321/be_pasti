@@ -17,13 +17,13 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
-app.use('/api/survei', authenticateToken, surveiRoutes);
+app.use('/api/survei', surveiRoutes);
 app.use('/api/anomali', authenticateToken, anomaliRoutes);
-app.use('/api/penyelesaian/public', penyelesaianRoutes.publicRouter);
-app.use('/api/penyelesaian', authenticateToken, penyelesaianRoutes);
-app.use('/api/sheets', authenticateToken, sheetsRoutes);
+app.use('/api/public/penyelesaian', penyelesaianRoutes.publicRouter);
+app.use('/api/penyelesaian', penyelesaianRoutes);
+app.use('/api/sheets', sheetsRoutes);
 app.use('/api/users', authenticateToken, userRoutes);
-app.use('/api/dashboard', authenticateToken, dashboardRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/skema', authenticateToken, skemaRoutes);
 
 const PORT = process.env.PORT || 5000;
