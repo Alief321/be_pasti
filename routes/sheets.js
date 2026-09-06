@@ -6,7 +6,8 @@ const path = require('path');
 const router = express.Router();
 
 // Setup Multer untuk simpan file sementara di folder 'uploads/'
-const upload = multer({ dest: 'uploads/' });
+const uploadDirectory = process.env.VERCEL ? '/tmp' : path.join(__dirname, '../uploads');
+const upload = multer({ dest: uploadDirectory });
 
 // Auth Google API (Digunakan untuk Sheets & Drive)
 const getGoogleAuth = () => {
