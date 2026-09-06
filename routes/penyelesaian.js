@@ -18,11 +18,8 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { id_survei, nama, link_spreadsheet_anomali, spreadsheet_id, uploaded_by } = req.body;
-  const { data, error } = await supabase
-    .from('penyelesaian_anomali')
-    .insert([{ id_survei, Nama: nama, link_spreadsheet_anomali, spreadsheet_id, uploaded_by }])
-    .select();
+  const { id_survei, Nama, link_spreadsheet_anomali, spreadsheet_id, uploaded_by, gabung_dengan_id } = req.body;
+  const { data, error } = await supabase.from('penyelesaian_anomali').insert([{ id_survei, Nama, link_spreadsheet_anomali, spreadsheet_id, uploaded_by, gabung_dengan_id }]).select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
@@ -36,8 +33,8 @@ router.delete('/:id', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { id_survei, nama, link_spreadsheet_anomali, spreadsheet_id, uploaded_by } = req.body;
-  const { data, error } = await supabase.from('penyelesaian_anomali').update({ id_survei, nama, link_spreadsheet_anomali, spreadsheet_id, uploaded_by }).eq('id', id).select();
+  const { id_survei, Nama, link_spreadsheet_anomali, spreadsheet_id, uploaded_by, gabung_dengan_id } = req.body;
+  const { data, error } = await supabase.from('penyelesaian_anomali').update({ id_survei, Nama, link_spreadsheet_anomali, spreadsheet_id, uploaded_by, gabung_dengan_id }).eq('id', id).select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });

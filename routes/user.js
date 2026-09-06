@@ -11,8 +11,8 @@ router.get('/', async (req, res) => {
 
 // POST user baru
 router.post('/', async (req, res) => {
-  const { email, role } = req.body;
-  const { data, error } = await supabase.from('users').insert([{ email, role }]).select();
+  const { name, email, role } = req.body;
+  const { data, error } = await supabase.from('users').insert([{ name, email, role }]).select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
@@ -20,8 +20,8 @@ router.post('/', async (req, res) => {
 // PUT update user
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { email, role } = req.body;
-  const { data, error } = await supabase.from('users').update({ email, role }).eq('id', id).select();
+  const { name, email, role } = req.body;
+  const { data, error } = await supabase.from('users').update({ name, email, role }).eq('id', id).select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
