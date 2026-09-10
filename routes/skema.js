@@ -45,7 +45,10 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', upload.single('file'), async (req, res) => {
-  const { id_survei, name } = req.body;
+  // Tambahkan dukungan untuk variabel `nama_skema` dari frontend[cite: 7]
+  const { id_survei, name, nama_skema } = req.body;
+  const finalName = name || nama_skema;
+
   if (!id_survei) return res.status(400).json({ error: 'id_survei wajib diisi.' });
   if (!req.file) return res.status(400).json({ error: 'File wajib diunggah.' });
 
@@ -53,7 +56,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     const filePath = await uploadToStorage(req.file);
     const { data, error } = await supabase
       .from('skema_survei')
-      .insert([{ id_survei, file: filePath, name }])
+      .insert([{ id_survei, file: filePath, name: finalName }])
       .select()
       .single();
 
@@ -85,7 +88,9 @@ router.delete('/:id', async (req, res) => {
 
 router.put('/:id', upload.single('file'), async (req, res) => {
   const { id } = req.params;
-  const { id_survei } = req.body;
+  // Membaca `name` dan `nama_skema` dari payload agar nama bisa diperbarui[cite: 7]
+  const { id_survei, name, nama_skema } = req.body;
+
   const { data: existing, error: findError } = await supabase.from('skema_survei').select('file').eq('id', id).single();
   if (findError) return res.status(404).json({ error: findError.message });
 
@@ -93,11 +98,16 @@ router.put('/:id', upload.single('file'), async (req, res) => {
     const newFilePath = await uploadToStorage(req.file);
     const updateData = {};
     if (id_survei !== undefined) updateData.id_survei = id_survei;
+
+    // Simpan pembaruan nama[cite: 7]
+    const finalName = name || nama_skema;
+    if (finalName) updateData.name = finalName;
+
     if (newFilePath) updateData.file = newFilePath;
 
     const { data, error } = await supabase.from('skema_survei').update(updateData).eq('id', id).select().single();
     if (error) {
-      await removeFromStorage(newFilePath);
+      if (newFilePath) await removeFromStorage(newFilePath);
       return res.status(500).json({ error: error.message });
     }
 
