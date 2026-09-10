@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
+const { hashPassword } = require('../utils/auth');
 
 // GET semua user
 router.get('/', async (req, res) => {
@@ -13,7 +14,10 @@ router.get('/', async (req, res) => {
 // POST user baru
 router.post('/', async (req, res) => {
   const { name, email, role, password } = req.body;
-  const { data, error } = await supabase.from('users').insert([{ name, email, role, password }]).select();
+  const { data, error } = await supabase
+    .from('users')
+    .insert([{ name, email, role, password: hashPassword(password) }])
+    .select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
@@ -26,7 +30,7 @@ router.put('/:id', async (req, res) => {
   // Buat payload dinamis: Hanya masukkan password jika ada isinya
   const updatePayload = { name, email, role };
   if (password) {
-    updatePayload.password = password;
+    updatePayload.password = hashPassword(password);
   }
 
   const { data, error } = await supabase.from('users').update(updatePayload).eq('id', id).select();
