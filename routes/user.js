@@ -1,3 +1,4 @@
+// user.js
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
@@ -11,8 +12,8 @@ router.get('/', async (req, res) => {
 
 // POST user baru
 router.post('/', async (req, res) => {
-  const { name, email, role } = req.body;
-  const { data, error } = await supabase.from('users').insert([{ name, email, role }]).select();
+  const { name, email, role, password } = req.body;
+  const { data, error } = await supabase.from('users').insert([{ name, email, role, password }]).select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
@@ -20,8 +21,15 @@ router.post('/', async (req, res) => {
 // PUT update user
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, email, role } = req.body;
-  const { data, error } = await supabase.from('users').update({ name, email, role }).eq('id', id).select();
+  const { name, email, role, password } = req.body;
+
+  // Buat payload dinamis: Hanya masukkan password jika ada isinya
+  const updatePayload = { name, email, role };
+  if (password) {
+    updatePayload.password = password;
+  }
+
+  const { data, error } = await supabase.from('users').update(updatePayload).eq('id', id).select();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data[0]);
 });
